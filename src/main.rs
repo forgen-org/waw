@@ -16,7 +16,8 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let workflow = Workflow::new(&args.workflow)?;
-    let engine = WorkflowEngine::new()?;
+    let mut engine = WorkflowEngine::new()?;
+    engine.load_components(&workflow).await?;
     let res = engine.execute_workflow(&workflow).await?;
     println!("Result: {:?}", res);
     Ok(())

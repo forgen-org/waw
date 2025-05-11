@@ -1,25 +1,24 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use anyhow::Result;
 use wasmtime::{
-    component::{Component, Linker, Val},
+    component::{Component, Linker, ResourceTable, Val},
     Config, Engine, Store,
 };
+use wasmtime_wasi::{IoView, WasiCtx, WasiView};
 
-use crate::Workflow;
+use crate::{Context, Workflow};
 
 pub struct WorkflowEngine {
-    engine: Engine,
+    context: Context,
     components: HashMap<String, Component>,
 }
 
 impl WorkflowEngine {
     pub fn new() -> Result<Self> {
-        let mut config = Config::new();
-        config.wasm_component_model(true);
-        let engine = Engine::new(&config)?;
+        let context = Context::new()?;
         Ok(Self {
-            engine,
+            context,
             components: HashMap::new(),
         })
     }
@@ -34,46 +33,34 @@ impl WorkflowEngine {
             let component_bytes = std::fs::read(&path)
                 .map_err(|e| anyhow::anyhow!("Failed to read component file '{}': {}", path, e))?;
 
-            let component = Component::new(&self.engine, &component_bytes)?;
+            let component = Component::new(&self.context.engine, &component_bytes)?;
 
             self.components.insert(path.to_string(), component);
         }
         Ok(())
     }
 
-    pub async fn execute_workflow(&self, workflow: &Workflow) -> Result<serde_json::Value> {
-        let mut store = Store::new(&self.engine, ());
+    pub async fn execute_workflow(&mut self, workflow: &Workflow) -> Result<serde_json::Value> {
         let mut last_result = None;
 
         for step in &workflow.0 {
             let component = self
                 .components
                 .get(&step.wasm)
-                .ok_or_else(|| anyhow::anyhow!("Component '{}' not found", step.wasm,))?;
-
-            // Process inputs using template variables
-            // let processed_inputs: Vec<serde_json::Value> = step
-            //     .inputs
-            //     .iter()
-            //     .map(|value| {
-            //         // if template.starts_with("${workflow.input.") {
-            //         //     let key = template
-            //         //         .trim_start_matches("${workflow.input.")
-            //         //         .trim_end_matches("}");
-            //         //     inputs.get(key).cloned().unwrap_or(serde_json::Value::Null)
-            //         // } else {
-            //         //     serde_json::Value::String(template.to_string())
-            //         // }
-            //     })
-            //     .collect();
+                .ok_or_else(|| anyhow::anyhow!("Component '{}' not found", step.wasm))?;
 
             // Execute the component
-            let linker = Linker::new(&self.engine);
-            let instance = linker.instantiate(&mut store, &component)?;
+            let instance = &self
+                .context
+                .linker
+                .instantiate(&mut self.context.store, &component)?;
+
+            // Add WASI
+            wasmtime_wasi::add_to_linker_async(&mut self.context.linker)?;
 
             // Get the function we want to call
             let func = instance
-                .get_func(&mut store, &step.function)
+                .get_func(&mut self.context.store, &step.function)
                 .ok_or_else(|| anyhow::anyhow!("Function not found"))?;
             // Convert inputs to component values
             let input_vals: Vec<Val> = step.inputs.iter().map(|value| value.val()).collect();
@@ -82,7 +69,7 @@ impl WorkflowEngine {
             let mut result_vals = vec![wasmtime::component::Val::S32(0)];
 
             // Call the function
-            func.call(&mut store, &input_vals, &mut result_vals)?;
+            func.call(&mut self.context.store, &input_vals, &mut result_vals)?;
 
             // Convert result back to JSON
             last_result = Some(match result_vals.get(0) {

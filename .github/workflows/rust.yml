@@ -1,0 +1,60 @@
+name: Rust
+
+on:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    - uses: dtolnay/rust-toolchain@nightly
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo check --all-targets
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    - uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: clippy
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo clippy --all-targets -- -D warnings
+
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    - uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: rustfmt
+    - run: cargo fmt --all -- --check
+      working-directory: ${{ matrix.change }}
+    - run: cargo install --locked --git https://github.com/dcchut/cargo-derivefmt --bin cargo-derivefmt
+    - run: |
+        cargo derivefmt
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "::error::cargo derivefmt would modify files. Please run it locally and commit the changes."
+          exit 1
+        fi
+      working-directory: ${{ matrix.change }}
+    
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    - uses: dtolnay/rust-toolchain@nightly
+    - uses: Swatinem/rust-cache@v2
+    - run: cargo test --all-targets

@@ -50,8 +50,8 @@ impl<'de> Deserialize<'de> for Value {
                     return Err(serde::de::Error::custom("invalid number format"));
                 }
             }
-            serde_json::Value::String(s) => Val::String(s.into_boxed_str()),
-            serde_json::Value::Null => Val::String("".to_string().into_boxed_str()), // TODO
+            serde_json::Value::String(s) => Val::String(s),
+            serde_json::Value::Null => Val::String("".to_string()), // TODO
             _ => return Err(serde::de::Error::custom("unsupported value type")),
         };
 
