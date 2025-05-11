@@ -1,12 +1,15 @@
 use serde::Deserialize;
-use wasmtime::component::Val;
+use wasmtime::component::{Type, Val};
 
 #[derive(Debug)]
-pub struct Value(Val);
+pub struct Value {
+    ty: Type,
+    value: String,
+}
 
 impl Value {
-    pub fn val(&self) -> Val {
-        self.0.clone()
+    pub fn val(&self) -> Result<Val, wasm_wave::parser::ParserError> {
+        Ok(wasm_wave::from_str(&self.ty, &self.value)?)
     }
 }
 
@@ -15,46 +18,74 @@ impl<'de> Deserialize<'de> for Value {
     where
         D: serde::Deserializer<'de>,
     {
-        let value: serde_json::Value = serde::Deserialize::deserialize(deserializer)?;
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field {
+            Type,
+            Value,
+        }
 
-        let val = match value {
-            serde_json::Value::Bool(b) => Val::Bool(b),
-            serde_json::Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    if i >= i8::MIN as i64 && i <= i8::MAX as i64 {
-                        Val::S8(i as i8)
-                    } else if i >= i16::MIN as i64 && i <= i16::MAX as i64 {
-                        Val::S16(i as i16)
-                    } else if i >= i32::MIN as i64 && i <= i32::MAX as i64 {
-                        Val::S32(i as i32)
-                    } else {
-                        Val::S64(i)
-                    }
-                } else if let Some(u) = n.as_u64() {
-                    if u <= u8::MAX as u64 {
-                        Val::U8(u as u8)
-                    } else if u <= u16::MAX as u64 {
-                        Val::U16(u as u16)
-                    } else if u <= u32::MAX as u64 {
-                        Val::U32(u as u32)
-                    } else {
-                        Val::U64(u)
-                    }
-                } else if let Some(f) = n.as_f64() {
-                    if f >= f32::MIN as f64 && f <= f32::MAX as f64 {
-                        Val::Float32(f as f32)
-                    } else {
-                        Val::Float64(f)
-                    }
-                } else {
-                    return Err(serde::de::Error::custom("invalid number format"));
-                }
+        struct ValueVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ValueVisitor {
+            type Value = Value;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("struct Value with type and value fields")
             }
-            serde_json::Value::String(s) => Val::String(s),
-            serde_json::Value::Null => Val::String("".to_string()), // TODO
-            _ => return Err(serde::de::Error::custom("unsupported value type")),
-        };
 
-        Ok(Value(val))
+            fn visit_map<V>(self, mut map: V) -> Result<Value, V::Error>
+            where
+                V: serde::de::MapAccess<'de>,
+            {
+                let mut ty = None;
+                let mut value = None;
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Type => {
+                            if ty.is_some() {
+                                return Err(serde::de::Error::duplicate_field("type"));
+                            }
+                            let type_str: String = map.next_value()?;
+                            ty = Some(match type_str.as_str() {
+                                "bool" => Type::Bool,
+                                "s8" => Type::S8,
+                                "u8" => Type::U8,
+                                "s16" => Type::S16,
+                                "u16" => Type::U16,
+                                "s32" => Type::S32,
+                                "u32" => Type::U32,
+                                "s64" => Type::S64,
+                                "u64" => Type::U64,
+                                "float32" => Type::Float32,
+                                "float64" => Type::Float64,
+                                "char" => Type::Char,
+                                "string" => Type::String,
+                                _ => {
+                                    return Err(serde::de::Error::custom(format!(
+                                        "unsupported type: {}",
+                                        type_str
+                                    )))
+                                }
+                            });
+                        }
+                        Field::Value => {
+                            if value.is_some() {
+                                return Err(serde::de::Error::duplicate_field("value"));
+                            }
+                            value = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let ty = ty.ok_or_else(|| serde::de::Error::missing_field("type"))?;
+                let value = value.ok_or_else(|| serde::de::Error::missing_field("value"))?;
+
+                Ok(Value { ty, value })
+            }
+        }
+
+        deserializer.deserialize_struct("Value", &["type", "value"], ValueVisitor)
     }
 }

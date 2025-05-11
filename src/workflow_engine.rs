@@ -41,7 +41,7 @@ impl WorkflowEngine {
     pub async fn execute_workflow(
         &mut self,
         workflow: &Workflow,
-    ) -> Result<serde_json::Value, WorkflowEngineError> {
+    ) -> Result<Option<String>, WorkflowEngineError> {
         let mut last_result = None;
 
         for step in &workflow.0 {
@@ -63,7 +63,11 @@ impl WorkflowEngine {
                 .ok_or(WorkflowEngineError::FunctionNotFound(step.function.clone()))?;
 
             // Convert inputs to component values
-            let input_vals: Vec<Val> = step.inputs.iter().map(|value| value.val()).collect();
+            let input_vals: Vec<Val> = step
+                .inputs
+                .iter()
+                .map(|value| value.val())
+                .collect::<Result<Vec<_>, _>>()?;
 
             // Prepare result buffer
             let mut result_vals = vec![wasmtime::component::Val::S32(0)];
@@ -73,13 +77,10 @@ impl WorkflowEngine {
                 .await?;
 
             // Convert result back to JSON
-            last_result = Some(match result_vals.get(0) {
-                Some(Val::S32(n)) => serde_json::Value::Number((*n).into()),
-                _ => serde_json::Value::Null,
-            });
+            last_result = result_vals.get(0).cloned();
         }
 
-        Ok(last_result.unwrap_or(serde_json::Value::Null))
+        Ok(last_result.map(|val| val.to_wave().unwrap()))
     }
 }
 
@@ -93,4 +94,6 @@ pub enum WorkflowEngineError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Wasmtime(#[from] wasmtime::Error),
+    #[error(transparent)]
+    WasmWave(#[from] wasm_wave::parser::ParserError),
 }

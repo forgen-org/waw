@@ -13,5 +13,6 @@ serde_json = "1.0"
 serde_yaml = "0.9.34"
 thiserror = "2.0.12"
 tokio = { version = "1.0", features = ["full"] }
-wasmtime = { version = "32.0" }
+wasm-wave = "0.228.0"
+wasmtime = { version = "32.0", features = ["wave"] }
 wasmtime-wasi = "32.0"
