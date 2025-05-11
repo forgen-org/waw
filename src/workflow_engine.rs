@@ -1,11 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
 
-use anyhow::Result;
-use wasmtime::{
-    component::{Component, Linker, ResourceTable, Val},
-    Config, Engine, Store,
-};
-use wasmtime_wasi::{IoView, WasiCtx, WasiView};
+use thiserror::Error;
+use wasmtime::component::{Component, Val};
 
 use crate::{Context, Workflow};
 
@@ -15,7 +11,7 @@ pub struct WorkflowEngine {
 }
 
 impl WorkflowEngine {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> Result<Self, WorkflowEngineError> {
         let context = Context::new()?;
         Ok(Self {
             context,
@@ -23,15 +19,17 @@ impl WorkflowEngine {
         })
     }
 
-    pub async fn load_components(&mut self, workflow: &Workflow) -> Result<()> {
+    pub async fn load_components(
+        &mut self,
+        workflow: &Workflow,
+    ) -> Result<(), WorkflowEngineError> {
         let paths: Vec<String> = workflow.0.iter().map(|step| step.wasm.clone()).collect();
         for path in paths {
             if self.components.contains_key(&path) {
                 continue;
             }
 
-            let component_bytes = std::fs::read(&path)
-                .map_err(|e| anyhow::anyhow!("Failed to read component file '{}': {}", path, e))?;
+            let component_bytes = std::fs::read(&path)?;
 
             let component = Component::new(&self.context.engine, &component_bytes)?;
 
@@ -40,28 +38,30 @@ impl WorkflowEngine {
         Ok(())
     }
 
-    pub async fn execute_workflow(&mut self, workflow: &Workflow) -> Result<serde_json::Value> {
+    pub async fn execute_workflow(
+        &mut self,
+        workflow: &Workflow,
+    ) -> Result<serde_json::Value, WorkflowEngineError> {
         let mut last_result = None;
 
         for step in &workflow.0 {
             let component = self
                 .components
                 .get(&step.wasm)
-                .ok_or_else(|| anyhow::anyhow!("Component '{}' not found", step.wasm))?;
+                .ok_or(WorkflowEngineError::ComponentNotFound(step.wasm.clone()))?;
 
             // Execute the component
             let instance = &self
                 .context
                 .linker
-                .instantiate(&mut self.context.store, &component)?;
-
-            // Add WASI
-            wasmtime_wasi::add_to_linker_async(&mut self.context.linker)?;
+                .instantiate_async(&mut self.context.store, &component)
+                .await?;
 
             // Get the function we want to call
             let func = instance
                 .get_func(&mut self.context.store, &step.function)
-                .ok_or_else(|| anyhow::anyhow!("Function not found"))?;
+                .ok_or(WorkflowEngineError::FunctionNotFound(step.function.clone()))?;
+
             // Convert inputs to component values
             let input_vals: Vec<Val> = step.inputs.iter().map(|value| value.val()).collect();
 
@@ -80,4 +80,16 @@ impl WorkflowEngine {
 
         Ok(last_result.unwrap_or(serde_json::Value::Null))
     }
+}
+
+#[derive(Debug, Error)]
+pub enum WorkflowEngineError {
+    #[error("Component not found: {0}")]
+    ComponentNotFound(String),
+    #[error("Function not found: {0}")]
+    FunctionNotFound(String),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Wasmtime(#[from] wasmtime::Error),
 }

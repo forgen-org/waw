@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use thiserror::Error;
 use waw::{Workflow, WorkflowEngine};
 
 /// A CLI tool for executing workflows
@@ -13,7 +14,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), MainError> {
     let args = Args::parse();
     let workflow = Workflow::new(&args.workflow)?;
     let mut engine = WorkflowEngine::new()?;
@@ -21,4 +22,12 @@ async fn main() -> anyhow::Result<()> {
     let res = engine.execute_workflow(&workflow).await?;
     println!("Result: {:?}", res);
     Ok(())
+}
+
+#[derive(Debug, Error)]
+pub enum MainError {
+    #[error(transparent)]
+    WorkflowError(#[from] waw::WorkflowError),
+    #[error(transparent)]
+    WorkflowEngineError(#[from] waw::WorkflowEngineError),
 }
