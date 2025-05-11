@@ -69,7 +69,8 @@ impl WorkflowEngine {
             let mut result_vals = vec![wasmtime::component::Val::S32(0)];
 
             // Call the function
-            func.call(&mut self.context.store, &input_vals, &mut result_vals)?;
+            func.call_async(&mut self.context.store, &input_vals, &mut result_vals)
+                .await?;
 
             // Convert result back to JSON
             last_result = Some(match result_vals.get(0) {
