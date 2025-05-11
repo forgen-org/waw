@@ -1,0 +1,30 @@
+[package]
+name = "waw"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wit-bindgen = { version = "0.16.0", features = ["realloc"] }
+wasmtime = { version = "16.0", features = ["component-model"] }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+clap = { version = "4.5", features = ["derive"] }
+wasm-wave = "0.230.0"
+serde_yaml = "0.9.34"
+thiserror = "2.0.12"
+
+[build-dependencies]
+wit-component = "0.16.0"
+
+[package.metadata.component]
+package = "example:component"
+
+[package.metadata.component.target]
+path = "components/add.wit"
+
+[package.metadata.component.dependencies]

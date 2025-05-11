@@ -1,0 +1,5 @@
+- function: add
+  inputs: 
+      - 1
+      - 2
+  wasm: ./example/demo.wasm
